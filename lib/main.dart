@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:ui';
 
+import 'package:dock_mac_os/widgets/dock_item.dart';
+import 'package:dock_mac_os/widgets/dock_item_opacity.dart';
 import 'package:flutter/material.dart';
 
 /// Entrypoint of the application.
@@ -141,139 +143,135 @@ class _DockState<T extends Object> extends State<Dock<T>>
 
           // Translation value to move items above the non-hovered item.
           final hoverTranslation =
-              _shouldTranslate(index, _hoveredIndex) ? -itemSize / 8 : 0.0;
+              _shouldTranslate(index, _hoveredIndex) ? -itemSize / 7 : 0.0;
 
-          return AnimatedBuilder(
-            animation: _animation,
-            builder: (context, child) => MouseRegion(
-              cursor: SystemMouseCursors.click,
-              onEnter: ((event) {
-                setState(() {
-                  _hoveredIndex = index;
-                });
-                _swapItems();
-              }),
-              onExit: (event) {
-                setState(() {
-                  if (_draggingItem == null) {
-                    _hoveredIndex = null;
-                  }
-                });
-              },
-              child: Draggable<T>(
-                data: item,
-                feedback: widget.builder(
-                  item,
-                  itemSize,
-                  hoverTranslation,
-                ),
-                childWhenDragging: AnimatedBuilder(
-                  animation: _animation,
+          return MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: ((event) {
+              setState(() {
+                _hoveredIndex = index;
+              });
+              _swapItems();
+            }),
+            onExit: (event) {
+              setState(() {
+                if (_draggingItem == null) {
+                  _hoveredIndex = null;
+                }
+              });
+            },
+            child: Draggable<T>(
+              data: item,
+              feedback: widget.builder(
+                item,
+                itemSize,
+                hoverTranslation,
+              ),
+              childWhenDragging: AnimatedBuilder(
+                animation: _animation,
 
-                  // duration: const Duration(milliseconds: 300),
-                  builder: (context, child) => DockItemOpacity(
-                    opacity:
-                        (isHovering || isDragging || _isDroppedOutside) ? 0 : 1,
-                    itemSize: _isDroppedOutside ? 0 : itemSize,
-                    child: widget.builder(
-                      item,
-                      itemSize,
-                      hoverTranslation,
-                    ),
+                // duration: const Duration(milliseconds: 300),
+                builder: (context, child) => DockItemOpacity(
+                  opacity:
+                      (isHovering || isDragging || _isDroppedOutside) ? 0 : 1,
+                  itemSize: _isDroppedOutside ? 0 : itemSize,
+                  child: widget.builder(
+                    item,
+                    itemSize,
+                    hoverTranslation,
                   ),
                 ),
-                onDragStarted: () => setState(() {
-                  _draggingItem = item;
-                  _hoveredIndex = index;
-                  _swapItems();
-                }),
-                onDragUpdate: (details) {
-                  //Global used to find the RenderBox of the Dock container.
-                  final RenderBox dockBox = widget._dockKey.currentContext
+              ),
+              onDragStarted: () => setState(() {
+                _draggingItem = item;
+                _hoveredIndex = index;
+                _swapItems();
+              }),
+              onDragUpdate: (details) {
+                //Global used to find the RenderBox of the Dock container.
+                final RenderBox dockBox = widget._dockKey.currentContext
+                    ?.findRenderObject() as RenderBox;
+
+                // The global bounds of the dock.
+                final Offset dockTopLeft = dockBox.localToGlobal(Offset.zero);
+                final Size dockSize = dockBox.size;
+
+                // The current global position of the dragged item.
+                final Offset dragPosition = details.globalPosition;
+
+                // Check if the drag position is outside the dock's bounds.
+                final bool isOutside = dragPosition.dx < dockTopLeft.dx ||
+                    dragPosition.dx > dockTopLeft.dx + dockSize.width ||
+                    dragPosition.dy < dockTopLeft.dy ||
+                    dragPosition.dy > dockTopLeft.dy + dockSize.height;
+
+                setState(() {
+                  _isDroppedOutside = isOutside;
+                });
+              },
+              onDragEnd: (_) {
+                setState(() {
+                  _draggingItem = null;
+                  _hoveredIndex = null;
+                  _isDroppedOutside = false;
+                });
+              },
+              child: DragTarget<T>(
+                onMove: (details) {
+                  final RenderBox renderBox = widget._dockKey.currentContext
                       ?.findRenderObject() as RenderBox;
 
-                  // The global bounds of the dock.
-                  final Offset dockTopLeft = dockBox.localToGlobal(Offset.zero);
-                  final Size dockSize = dockBox.size;
+                  // The local position of the dragged item.
+                  final localPosition = renderBox.globalToLocal(details.offset);
 
-                  // The current global position of the dragged item.
-                  final Offset dragPosition = details.globalPosition;
+                  // The position of each item within the container.
+                  final double itemWidth =
+                      (renderBox.size.width / _items.length) - 10;
 
-                  // Check if the drag position is outside the dock's bounds.
-                  final bool isOutside = dragPosition.dx < dockTopLeft.dx ||
-                      dragPosition.dx > dockTopLeft.dx + dockSize.width ||
-                      dragPosition.dy < dockTopLeft.dy ||
-                      dragPosition.dy > dockTopLeft.dy + dockSize.height;
+                  // Get the new index for item placement.
+                  final newIndex = (localPosition.dx / itemWidth)
+                      .floor()
+                      .clamp(-1, _items.length - 1);
 
-                  setState(() {
-                    _isDroppedOutside = isOutside;
-                  });
+                  if (!_isDroppedOutside &&
+                      newIndex != _hoveredIndex &&
+                      newIndex != -1) {
+                    setState(() {
+                      _reorderItem(
+                        item: _draggingItem ?? details.data,
+                        newIndex: newIndex,
+                        itemsList: _items,
+                      );
+                      _hoveredIndex = newIndex;
+                    });
+                  }
                 },
-                onDragEnd: (_) {
+                onLeave: (_) {
                   setState(() {
-                    _draggingItem = null;
-                    _hoveredIndex = null;
                     _isDroppedOutside = false;
                   });
                 },
-                child: DragTarget<T>(
-                  onMove: (details) {
-                    final RenderBox renderBox = widget._dockKey.currentContext
-                        ?.findRenderObject() as RenderBox;
+                builder: (_, __, ___) {
+                  final isDraggedToNewIndex = (_draggingItem != null &&
+                      _hoveredIndex != null &&
+                      _items[_hoveredIndex!] == _draggingItem);
 
-                    // The local position of the dragged item.
-                    final localPosition =
-                        renderBox.globalToLocal(details.offset);
-
-                    // The position of each item within the container.
-                    final double itemWidth =
-                        (renderBox.size.width / _items.length) - 10;
-
-                    // Get the new index for item placement.
-                    final newIndex = (localPosition.dx / itemWidth)
-                        .floor()
-                        .clamp(-1, _items.length - 1);
-
-                    if (!_isDroppedOutside &&
-                        newIndex != _hoveredIndex &&
-                        newIndex != -1) {
-                      setState(() {
-                        _reorderItem(
-                          item: _draggingItem ?? details.data,
-                          newIndex: newIndex,
-                          itemsList: _items,
-                        );
-                        _hoveredIndex = newIndex;
-                      });
-                    }
-                  },
-                  onLeave: (_) {
-                    setState(() {
-                      _isDroppedOutside = false;
-                    });
-                  },
-                  builder: (_, __, ___) {
-                    final isDraggedToNewIndex = (_draggingItem != null &&
-                        _hoveredIndex != null &&
-                        _items[_hoveredIndex!] == _draggingItem);
-
-                    return AnimatedBuilder(
-                      animation: _animation,
-                      builder: (context, child) => DockItemOpacity(
-                        opacity:
-                            ((isHovering || isDragging) && isDraggedToNewIndex)
-                                ? 0
-                                : 1,
-                        itemSize: itemSize,
-                        child: widget.builder(
-                          item,
-                          itemSize,
-                          hoverTranslation,
-                        ),
+                  return AnimatedBuilder(
+                    animation: _animation,
+                    builder: (context, child) => DockItemOpacity(
+                      opacity:
+                          ((isHovering || isDragging) && isDraggedToNewIndex)
+                              ? 0
+                              : 1,
+                      itemSize: itemSize,
+                      child: widget.builder(
+                        item,
+                        itemSize,
+                        hoverTranslation,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             ),
           );
@@ -295,22 +293,6 @@ class _DockState<T extends Object> extends State<Dock<T>>
       itemsList.insert(newIndex, item);
     }
   }
-
-  /// Calculates the magnification factor based on proximity to the hovered index.
-  /*double _getMagnificationFactor(int index) {
-    if (_hoveredIndex == null) return 1.0;
-
-    const double proximityScaling = 0.4;
-    final int distance = (index - (_hoveredIndex ?? 0)).abs();
-
-    // Only apply magnification to hovered item and its nearby items.
-    return lerpDouble(
-          1.0,
-          hoverItemSize / baseItemSize,
-          max(0, 1 - distance * proximityScaling),
-        ) ??
-        1.0;
-  }*/
 
   /// Calculates the magnification factor based on proximity to the hovered index.
   double _getMagnificationFactor(int index) {
@@ -338,70 +320,5 @@ class _DockState<T extends Object> extends State<Dock<T>>
     // Allow translation for the dragged item and its immediate neighbors.
     final int distance = (hoveredIndex - index).abs();
     return distance <= 1;
-  }
-}
-
-/// Widget representing the single item of the [Dock].
-class DockItem extends StatelessWidget {
-  const DockItem({
-    super.key,
-    required this.iconData,
-    required this.itemSize,
-    required this.yTranslationValue,
-  });
-
-  final IconData iconData;
-  final double itemSize;
-  final double yTranslationValue;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      // transform duration
-
-      constraints: BoxConstraints(minWidth: itemSize),
-      alignment: AlignmentDirectional.topCenter,
-      curve: TreeSliver.defaultAnimationCurve,
-      transform: Matrix4.translationValues(0, yTranslationValue, 0),
-      height: itemSize,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: Colors.primaries[iconData.hashCode % Colors.primaries.length],
-      ),
-      child: Center(child: Icon(iconData, color: Colors.white)),
-    );
-  }
-}
-
-/// This widget controls the visibility of the [DockItem].
-class DockItemOpacity extends StatelessWidget {
-  const DockItemOpacity({
-    super.key,
-    required this.opacity,
-    required this.itemSize,
-    required this.child,
-  });
-
-  final double opacity;
-  final double itemSize;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      // curve: Curves.easeInOut,
-      height: itemSize,
-      width: itemSize,
-      constraints: BoxConstraints(minWidth: itemSize),
-      margin: itemSize == 0
-          ? null
-          : const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      child: Opacity(
-        opacity: opacity,
-        child: child,
-      ),
-    );
   }
 }
